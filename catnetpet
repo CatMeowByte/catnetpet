@@ -5,39 +5,144 @@
 # Configuration
 # ========
 
-# Icon character width
-ICON_WIDTH=1
+# Show network info
+SHOW_NETINFO=1
 
-# Icon character scale
-ICON_SCALE=1
+# Show icon pixel
+DEBUG_ICON_PIXEL=0
+
+# Show cycle all icon
+DEBUG_ICON_TEST=0
+
+# Icon character width
+ICON_WIDTH=2
 
 # Character representing "off" pixels in icon definition
 ICON_OFF="-"
 
 # Draw icon here
 # ICON_OFF character means off, any other character means on
-ICON_BIT=$(cat << ========
--------------
--------------
--------------
----#-----#---
-----#---#----
----#######---
---##-###-##--
--#-#######-#-
--#-#######-#-
--#-#-----#-#-
-----##-##----
--------------
--------------
--------------
+ICON_NORMAL=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+----##--------##----
+----##--------##----
+----##--------##----
+--------------------
+--------------------
+---#------------#---
+---##############---
+---##############---
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
 ========
 )
 
-# Space between icon and info
-SPACER_WIDTH=2
+ICON_IDLE=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+---####-----####----
+---##-------##------
+--------------------
+--------------------
+---------------#----
+-----###########----
+----############----
+---------------#----
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
 
-# Script
+ICON_ACTIVE=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+----##--------##----
+---####------####---
+--------------------
+--------------------
+--------------------
+----#----------#----
+----##--------##----
+-----##########-----
+------########------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
+
+ICON_INACTIVE=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+----#-#------#-#----
+-----#--------#-----
+----#-#------#-#----
+--------------------
+--------------------
+--------------------
+-------------###----
+-------######-------
+----###-------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
+
+ICON_DANGER=$(cat << ========
+--------------------
+------------#-#-----
+-------------#------
+------------#-#-----
+--------------------
+--------------------
+----#----------#----
+----##--------##----
+----###------###----
+--------------------
+-------######-------
+------#------#------
+------#------#------
+------#------#------
+------########------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
+
+# Color
 # ========
 BLACK="\033[30m"
 RED="\033[31m"
@@ -57,5 +162,282 @@ LIGHT_MAGENTA="\033[95m"
 LIGHT_CYAN="\033[96m"
 LIGHT_WHITE="\033[97m"
 
-BOLD="\033[1m"
 RESET="\033[0m"
+
+# Convert foreground color code to background
+# Maps ANSI 30-37 to 40-47 and 90-97 to 100-107
+color_to_bg() {
+ echo "$1" | sed 's/\[3/\[4/' | sed 's/\[9/\[10/'
+}
+
+# Get terminal dimensions from stty
+# Needed for scaling icons and positioning overlays to screen size
+stty_output=$(stty size)
+term_height=${stty_output%% *}
+term_width=${stty_output##* }
+
+# Check connectivity status via gstatic ping endpoint
+# Determine if device has internet access
+refresh_online_status() {
+ if curl -s --connect-timeout 2 --max-time 5 -w "%{http_code}" -o /dev/null https://gstatic.com/generate_204 | grep -q "204"; then
+  online_status="ONLINE"
+ else
+  online_status="OFFLINE"
+ fi
+}
+
+# Parse who output for SSH session origins
+# Show active remote connections to device
+refresh_ssh_ips() {
+ ssh_ips=$(who | grep sshd | sed 's/.*(\([^)]*\)).*/\1/' | paste -sd '|' - | sed 's/|/ | /g')
+}
+
+# Extract local IPv4 addresses from network interfaces
+# Display internal network connectivity of device
+refresh_local_ips() {
+ local_ips=$(ip -4 addr show | sed -n 's/.*inet \([^ /]*\).*/\1/p' | grep -v 127.0.0.1 | paste -sd '|' - | sed 's/|/ | /g')
+}
+
+# Get system hostname
+# Display device identifier
+refresh_hostname() {
+ hostname_str=$(hostname)
+}
+
+# Fetch public IP address with connection and time limits
+# Show external network identity accessible remotely
+refresh_public_ip() {
+ public_ip=$(curl -s --connect-timeout 5 --max-time 15 ifconfig.me 2>/dev/null || echo "")
+}
+
+# Build online status display string
+# Format status and IP for top-right overlay
+build_online_display() {
+ if [ "$online_status" = "ONLINE" ] && [ -n "$public_ip" ]; then
+  online_display="${online_status} | ${public_ip}"
+ else
+  online_display="${online_status} | XXX.XXX.XXX.XXX"
+ fi
+}
+
+# Build framebuffer from icon data with colors
+# ========
+# Accept icon bitmap, foreground color, background color and return colored framebuffer
+build_framebuffer() {
+ local icon_data=$1
+ local fg_color=$2
+ local bg_color=$3
+
+ # Extract first line width from icon
+ # Determine base horizontal dimension
+ local icon_base_width=$(expr $(printf '%s' "$icon_data" | head -n 1 | wc -c) - 1)
+
+ # Count total lines in icon
+ # Determine base vertical dimension
+ local icon_base_height=$(printf '%s\n' "$icon_data" | wc -l)
+
+ # Calculate maximum horizontal scale without overflow
+ # Prevent icon width exceeding terminal width
+ local max_h=$(expr $term_width / $(expr $icon_base_width \* $ICON_WIDTH))
+
+ # Calculate maximum vertical scale without overflow
+ # Prevent icon height exceeding terminal height
+ local max_v=$(expr $term_height / $icon_base_height)
+
+ # Select smaller of two scales
+ # Ensure icon fits within terminal bounds
+ local icon_scale
+ if [ $max_h -lt $max_v ]; then
+  icon_scale=$max_h
+ else
+  icon_scale=$max_v
+ fi
+
+ # Calculate horizontal repeat factor
+ # Determines pixel width after scaling
+ local h_repeat=$(expr $ICON_WIDTH \* $icon_scale)
+ local scaled_width=$(expr $icon_base_width \* $h_repeat)
+
+ # Calculate left padding
+ # Center icon horizontally
+ local h_pad=$(expr $term_width - $scaled_width)
+ local left_pad=$(expr $h_pad / 2)
+ local right_pad=$(expr $h_pad - $left_pad)
+
+ # Calculate vertical lines for scaled icon
+ # Determine icon height after vertical scaling
+ local icon_lines=$(expr $icon_base_height \* $icon_scale)
+
+ # Calculate top padding
+ # Center icon vertically
+ local top_pad=$(expr $(expr $term_height - $icon_lines) / 2)
+ local bottom_pad=$(expr $term_height - $top_pad - $icon_lines)
+
+ # Render icon with scaling, padding, and colors via awk
+ # Generate complete colored framebuffer ready for output
+ printf '%s\n' "$icon_data" | awk -v w=$h_repeat -v off="$ICON_OFF" -v scale=$icon_scale -v left=$left_pad -v right=$right_pad -v top=$top_pad -v bottom=$bottom_pad -v tw=$term_width -v fg="$fg_color" -v bg="$bg_color" -v reset="$RESET" -v debug_pixel="$DEBUG_ICON_PIXEL" '
+ BEGIN {
+  for(t=1; t<=top; t++)
+   printf "%s%s%*s%s\n", fg, bg, tw, "", reset
+ }
+ {
+  line = ""
+  for(i=1; i<=length($0); i++) {
+   c = substr($0, i, 1)
+   if (c == off) {
+    repl = debug_pixel ? "/" : " "
+   } else {
+    repl = "█"
+   }
+   for(j=1; j<=w; j++) line = line repl
+  }
+  for(s=1; s<=scale; s++)
+   printf "%s%s%*s%s%*s%s\n", fg, bg, left, "", line, right, "", reset
+ }
+ END {
+  for(b=1; b<=bottom; b++)
+   printf "%s%s%*s%s\n", fg, bg, tw, "", reset
+ }
+ '
+}
+
+# Build all icon framebuffers with colors
+# ========
+# normal: light white on black
+fb_normal=$(build_framebuffer "$ICON_NORMAL" "$LIGHT_WHITE" "$(color_to_bg "$BLACK")")
+
+# idle: light blue on black
+fb_idle=$(build_framebuffer "$ICON_IDLE" "$LIGHT_BLUE" "$(color_to_bg "$BLACK")")
+
+# active: light black on green
+fb_active=$(build_framebuffer "$ICON_ACTIVE" "$LIGHT_BLACK" "$(color_to_bg "$GREEN")")
+
+# inactive: light black on white
+fb_inactive=$(build_framebuffer "$ICON_INACTIVE" "$LIGHT_BLACK" "$(color_to_bg "$WHITE")")
+
+# danger: light black on red
+fb_danger=$(build_framebuffer "$ICON_DANGER" "$LIGHT_BLACK" "$(color_to_bg "$RED")")
+
+# Initialize all data on startup
+# Populate variables before first display
+refresh_local_ips
+refresh_ssh_ips
+refresh_hostname
+refresh_online_status
+refresh_public_ip
+build_online_display
+
+# Clear screen and scrollback history
+# Initialize clean display surface
+printf '\033[2J\033[H'
+
+# Hide text cursor
+# Maintain visual clarity during animation
+printf '\033[?25l'
+
+# Cleanup function restores cursor and exits
+# Ensure proper terminal state on program termination
+cleanup() {
+ printf '\033[?25h'
+ exit 0
+}
+
+# Register signal handlers for interrupt and termination
+# Exit cleanly on Ctrl+C or process termination
+trap 'cleanup' INT TERM
+
+# Initialize refresh timing trackers
+# Track last update time for each data category
+last_refresh_fast=$(date +%s)
+last_refresh_slow=$(date +%s)
+
+# Determine current icon state based on network conditions
+# ========
+# Evaluates device status and assigns correct icon priority
+determine_icon_state() {
+ if [ "$online_status" = "OFFLINE" ]; then
+  current_icon=3
+ elif [ -n "$ssh_ips" ] && echo "$ssh_ips" | grep -q "|"; then
+  current_icon=4
+ elif [ -n "$ssh_ips" ]; then
+  current_icon=2
+ elif [ -n "$public_ip" ]; then
+  current_icon=0
+ else
+  current_icon=1
+ fi
+}
+
+# Animation loop cycles through icon states
+# ========
+# Reposition cursor and redraw framebuffer each cycle
+current_icon=0
+while true; do
+ # Get current timestamp
+ # Compare against refresh intervals
+ current_time=$(date +%s)
+
+ # Check if fast refresh interval exceeded (2 seconds)
+ # Update local IPs, SSH IPs, hostname, online status
+ if [ $(expr $current_time - $last_refresh_fast) -ge 2 ]; then
+  refresh_local_ips
+  refresh_ssh_ips
+  refresh_hostname
+  refresh_online_status
+  build_online_display
+  determine_icon_state
+  last_refresh_fast=$current_time
+ fi
+
+ # Check if slow refresh interval exceeded (300 seconds / 5 minutes)
+ # Update public IP from network service
+ if [ $(expr $current_time - $last_refresh_slow) -ge 300 ]; then
+  refresh_public_ip
+  build_online_display
+  last_refresh_slow=$current_time
+ fi
+
+ # Move cursor to top-left without clearing
+ # Prepare for framebuffer output without flicker
+ printf '\033[H'
+
+ # Output current icon framebuffer
+ # Display scaled and centered icon state with colors
+ case $current_icon in
+  0) printf '%s' "$fb_normal" ;;
+  1) printf '%s' "$fb_idle" ;;
+  2) printf '%s' "$fb_active" ;;
+  3) printf '%s' "$fb_inactive" ;;
+  4) printf '%s' "$fb_danger" ;;
+ esac
+
+ if [ "$SHOW_NETINFO" -eq 1 ]; then
+  # Overlay local IPs at top-left
+  # Show device network interfaces
+  [ -n "$local_ips" ] && printf '\033[1;1H%s' "$local_ips"
+
+  # Overlay online status and public IP at top-right
+  # Show connectivity and external address
+  [ -n "$online_display" ] && printf '\033[1;%dH%s' "$(expr $term_width - ${#online_display} + 1)" "$online_display"
+
+  # Overlay hostname at bottom-left
+  # Display device identifier
+  [ -n "$hostname_str" ] && printf '\033[%d;1H%s' "$term_height" "$hostname_str"
+
+  # Overlay SSH IPs at bottom-right
+  # Show active remote sessions
+  [ -n "$ssh_ips" ] && printf '\033[%d;%dH%s' "$term_height" "$(expr $term_width - ${#ssh_ips} + 1)" "$ssh_ips"
+ fi
+
+ # Update icon state
+ # Either cycle all icons or use network state determination
+ if [ "$DEBUG_ICON_TEST" -eq 1 ]; then
+  current_icon=$(expr $(expr $current_icon + 1) % 5)
+ else
+  determine_icon_state
+ fi
+
+ # Wait one second before next cycle
+ # Control animation speed
+ sleep 1
+done
