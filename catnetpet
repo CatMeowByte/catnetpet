@@ -492,7 +492,7 @@ while true; do
   refresh_hostname
   refresh_online_status
   build_online_display
-  determine_icon_state
+  determine_state
   last_refresh_fast=$current_time
  fi
 
@@ -507,10 +507,10 @@ while true; do
  # Update animation state
  # ========
  # Blink timer countdown: decrement each tick
- if [ $animation_blink_timer -gt 0 ]; then
+ if [ "$animation_blink_timer" -gt 0 ]; then
   animation_blink_timer=$(expr $animation_blink_timer - 1)
  else
-  animation_blink_timer=$(expr $RANDOM % 15 + 2)
+  animation_blink_timer=$(( ($(date +%N) % 15 + 2) ))
  fi
 
  # Flip-flop toggle: alternate 0/1 each tick
