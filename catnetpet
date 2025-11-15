@@ -28,16 +28,40 @@ ICON_NORMAL=$(cat << ========
 --------------------
 --------------------
 --------------------
+-----##------##-----
+-----##------##-----
+-----##------##-----
 --------------------
-----##--------##----
-----##--------##----
-----##--------##----
+--------------------
 --------------------
 --------------------
 ---#------------#---
 ---##############---
 ---##############---
 --------------------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
+
+ICON_NORMAL_BLINK=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+----####----####----
+--------------------
+--------------------
+--------------------
+--------------------
+---#------------#---
+---##############---
+---##############---
 --------------------
 --------------------
 --------------------
@@ -53,9 +77,10 @@ ICON_IDLE=$(cat << ========
 --------------------
 --------------------
 --------------------
+---####----####-----
+---##------##-------
 --------------------
----####-----####----
----##-------##------
+--------------------
 --------------------
 --------------------
 ---------------#----
@@ -66,26 +91,121 @@ ICON_IDLE=$(cat << ========
 --------------------
 --------------------
 --------------------
+========
+)
+
+ICON_IDLE_BLINK=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+---####----####-----
+--------------------
+--------------------
+--------------------
+--------------------
+---------------#----
+-----###########----
+----############----
+---------------#----
+--------------------
+--------------------
+--------------------
 --------------------
 ========
 )
 
-ICON_ACTIVE=$(cat << ========
+ICON_ANGRY_0=$(cat << ========
 --------------------
 --------------------
 --------------------
 --------------------
 --------------------
+-----#--------#-----
+-----##------##-----
+-----###----###-----
 --------------------
-----##--------##----
----####------####---
 --------------------
---------------------
---------------------
-----#----------#----
-----##--------##----
------##########-----
+--------####--------
+-------######-------
 ------########------
+------########------
+------########------
+------########------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
+
+ICON_ANGRY_1=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+-----#--------#-----
+-----##------##-----
+-----###----###-----
+--------------------
+--------------------
+--------####--------
+-------######-------
+------########------
+------########------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
+
+ICON_SAD_0=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+-------#----#-------
+------##----##------
+-----###----###-----
+------#------#------
+--------------------
+--------------------
+-------######-------
+------########------
+------#------#------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+========
+)
+
+ICON_SAD_1=$(cat << ========
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+--------------------
+-------#----#-------
+------##----##------
+-----###----###-----
+------#------#------
+------#------#------
+--------------------
+-------######-------
+------########------
+------#------#------
 --------------------
 --------------------
 --------------------
@@ -99,41 +219,17 @@ ICON_INACTIVE=$(cat << ========
 --------------------
 --------------------
 --------------------
---------------------
---------------------
+---#---#----#---#---
 ----#-#------#-#----
 -----#--------#-----
 ----#-#------#-#----
+---#---#----#---#---
 --------------------
 --------------------
 --------------------
--------------###----
--------######-------
-----###-------------
---------------------
---------------------
---------------------
---------------------
---------------------
-========
-)
-
-ICON_DANGER=$(cat << ========
---------------------
-------------#-#-----
--------------#------
-------------#-#-----
---------------------
---------------------
-----#----------#----
-----##--------##----
-----###------###----
---------------------
--------######-------
-------#------#------
-------#------#------
-------#------#------
-------########------
+---##############---
+---##############---
+---#------------#---
 --------------------
 --------------------
 --------------------
@@ -303,20 +399,24 @@ build_framebuffer() {
 
 # Build all icon framebuffers with colors
 # ========
-# normal: light white on black
-fb_normal=$(build_framebuffer "$ICON_NORMAL" "$LIGHT_WHITE" "$(color_to_bg "$BLACK")")
+# inactive: black on light white
+fb_inactive=$(build_framebuffer "$ICON_INACTIVE" "$BLACK" "$(color_to_bg "$LIGHT_WHITE")")
 
-# idle: light blue on black
-fb_idle=$(build_framebuffer "$ICON_IDLE" "$LIGHT_BLUE" "$(color_to_bg "$BLACK")")
+# idle: light white on black
+fb_idle=$(build_framebuffer "$ICON_IDLE" "$LIGHT_WHITE" "$(color_to_bg "$BLACK")")
+fb_idle_blink=$(build_framebuffer "$ICON_IDLE_BLINK" "$LIGHT_WHITE" "$(color_to_bg "$BLACK")")
 
-# active: light black on green
-fb_active=$(build_framebuffer "$ICON_ACTIVE" "$LIGHT_BLACK" "$(color_to_bg "$GREEN")")
+# normal: light yellow on black
+fb_normal=$(build_framebuffer "$ICON_NORMAL" "$LIGHT_BLUE" "$(color_to_bg "$BLACK")")
+fb_normal_blink=$(build_framebuffer "$ICON_NORMAL_BLINK" "$LIGHT_BLUE" "$(color_to_bg "$BLACK")")
 
-# inactive: light black on white
-fb_inactive=$(build_framebuffer "$ICON_INACTIVE" "$LIGHT_BLACK" "$(color_to_bg "$WHITE")")
+# angry: black on red
+fb_angry_0=$(build_framebuffer "$ICON_ANGRY_0" "$BLACK" "$(color_to_bg "$RED")")
+fb_angry_1=$(build_framebuffer "$ICON_ANGRY_1" "$BLACK" "$(color_to_bg "$RED")")
 
-# danger: light black on red
-fb_danger=$(build_framebuffer "$ICON_DANGER" "$LIGHT_BLACK" "$(color_to_bg "$RED")")
+# sad: black on blue
+fb_sad_0=$(build_framebuffer "$ICON_SAD_0" "$BLACK" "$(color_to_bg "$BLUE")")
+fb_sad_1=$(build_framebuffer "$ICON_SAD_1" "$BLACK" "$(color_to_bg "$BLUE")")
 
 # Initialize all data on startup
 # Populate variables before first display
@@ -351,27 +451,34 @@ trap 'cleanup' INT TERM
 last_refresh_fast=$(date +%s)
 last_refresh_slow=$(date +%s)
 
-# Determine current icon state based on network conditions
+# Initialize animation state trackers
 # ========
-# Evaluates device status and assigns correct icon priority
-determine_icon_state() {
+# Blink timer: counts down each tick, 0 triggers blink and refills random 1-8
+animation_blink_timer=0
+
+# Flip-flop state: toggles 0/1 each tick for angry/sad animation
+animation_flip_flop=0
+
+# Determine current state based on network conditions
+# ========
+# Evaluates device status and assigns correct state
+determine_state() {
  if [ "$online_status" = "OFFLINE" ]; then
-  current_icon=3
- elif [ -n "$ssh_ips" ] && echo "$ssh_ips" | grep -q "|"; then
-  current_icon=4
- elif [ -n "$ssh_ips" ]; then
-  current_icon=2
- elif [ -n "$public_ip" ]; then
-  current_icon=0
+  current_state="INACTIVE"
+ elif [ -z "$ssh_ips" ]; then
+  current_state="IDLE"
+ elif echo "$ssh_ips" | grep -q "|"; then
+  current_state="ANGRY"
  else
-  current_icon=1
+  current_state="NORMAL"
  fi
 }
 
 # Animation loop cycles through icon states
 # ========
 # Reposition cursor and redraw framebuffer each cycle
-current_icon=0
+current_state="NORMAL"
+debug_icon_index=-1
 while true; do
  # Get current timestamp
  # Compare against refresh intervals
@@ -397,19 +504,45 @@ while true; do
   last_refresh_slow=$current_time
  fi
 
+ # Update animation state
+ # ========
+ # Blink timer countdown: decrement each tick
+ if [ $animation_blink_timer -gt 0 ]; then
+  animation_blink_timer=$(expr $animation_blink_timer - 1)
+ else
+  animation_blink_timer=$(expr $RANDOM % 15 + 2)
+ fi
+
+ # Flip-flop toggle: alternate 0/1 each tick
+ animation_flip_flop=$(expr 1 - $animation_flip_flop)
+
  # Move cursor to top-left without clearing
- # Prepare for framebuffer output without flicker
  printf '\033[H'
 
- # Output current icon framebuffer
- # Display scaled and centered icon state with colors
- case $current_icon in
-  0) printf '%s' "$fb_normal" ;;
-  1) printf '%s' "$fb_idle" ;;
-  2) printf '%s' "$fb_active" ;;
-  3) printf '%s' "$fb_inactive" ;;
-  4) printf '%s' "$fb_danger" ;;
- esac
+ # Output framebuffer based on state and animation
+ # Display scaled and centered icon with animation variant
+ if [ "$DEBUG_ICON_TEST" -eq 1 ]; then
+  debug_icon_index=$(expr $(expr $debug_icon_index + 1) % 9)
+  case $debug_icon_index in
+   0) printf '%s' "$fb_inactive" ;;
+   1) printf '%s' "$fb_idle" ;;
+   2) printf '%s' "$fb_idle_blink" ;;
+   3) printf '%s' "$fb_normal" ;;
+   4) printf '%s' "$fb_normal_blink" ;;
+   5) printf '%s' "$fb_angry_0" ;;
+   6) printf '%s' "$fb_angry_1" ;;
+   7) printf '%s' "$fb_sad_0" ;;
+   8) printf '%s' "$fb_sad_1" ;;
+  esac
+ else
+  case $current_state in
+   INACTIVE) printf '%s' "$fb_inactive" ;;
+   IDLE) [ $animation_blink_timer -eq 0 ] && printf '%s' "$fb_idle_blink" || printf '%s' "$fb_idle" ;;
+   NORMAL) [ $animation_blink_timer -eq 0 ] && printf '%s' "$fb_normal_blink" || printf '%s' "$fb_normal" ;;
+   ANGRY) [ $animation_flip_flop -eq 0 ] && printf '%s' "$fb_angry_0" || printf '%s' "$fb_angry_1" ;;
+   SAD) [ $animation_flip_flop -eq 0 ] && printf '%s' "$fb_sad_0" || printf '%s' "$fb_sad_1" ;;
+  esac
+ fi
 
  if [ "$SHOW_NETINFO" -eq 1 ]; then
   # Overlay local IPs at top-left
@@ -429,15 +562,7 @@ while true; do
   [ -n "$ssh_ips" ] && printf '\033[%d;%dH%s' "$term_height" "$(expr $term_width - ${#ssh_ips} + 1)" "$ssh_ips"
  fi
 
- # Update icon state
- # Either cycle all icons or use network state determination
- if [ "$DEBUG_ICON_TEST" -eq 1 ]; then
-  current_icon=$(expr $(expr $current_icon + 1) % 5)
- else
-  determine_icon_state
- fi
-
  # Wait one second before next cycle
  # Control animation speed
- sleep 1
+ sleep 0.5
 done
