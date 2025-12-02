@@ -510,7 +510,7 @@ while true; do
  if [ "$animation_blink_timer" -gt 0 ]; then
   animation_blink_timer=$(expr $animation_blink_timer - 1)
  else
-  animation_blink_timer=$(( ($(date +%N) % 15 + 2) ))
+  animation_blink_timer=$(( $(printf '%d' "$(date +%N)") % 15 + 2 ))
  fi
 
  # Flip-flop toggle: alternate 0/1 each tick
